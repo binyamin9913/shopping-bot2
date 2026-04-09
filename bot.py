@@ -152,33 +152,43 @@ def send_main_menu(to: str, name: str = ""):
     if active:
         items    = get_list_items(str(active["_id"]))
         checked  = sum(1 for i in items if i.get("checked"))
+        is_mgr   = is_admin(str(active["_id"]), to)
+        third    = "⚙️ ניהול" if is_mgr else "🔗 שתף רשימה"
+
         body = (
             f"{greeting}"
             f"🛒 *רשימת קניות פעילה:* {active['name']}\n"
             f"📊 {checked}/{len(items)} פריטים נקנו\n\n"
-            f"מה תרצה לעשות?"
+            f"מה תרצה לעשות?\n\n"
+            f"1️⃣  📋 הצג רשימה\n"
+            f"2️⃣  ➕ הוסף מוצר\n"
+            f"3️⃣  {third}\n\n"
+            f"_שלח מספר לבחירה_"
         )
         buttons = [
-            {"id": "show_list",   "title": "📋 הצג רשימה"},
-            {"id": "add_item",    "title": "➕ הוסף מוצר"},
+            {"id": "show_list", "title": "📋 הצג רשימה"},
+            {"id": "add_item",  "title": "➕ הוסף מוצר"},
+            {"id": "admin_menu" if is_mgr else "share_list",
+             "title": "⚙️ ניהול" if is_mgr else "🔗 שתף"},
         ]
-        if is_admin(str(active["_id"]), to):
-            buttons.append({"id": "admin_menu", "title": "⚙️ ניהול"})
-        else:
-            buttons.append({"id": "share_list", "title": "🔗 שתף רשימה"})
     else:
         body = (
             f"{greeting}"
             f"🛒 *בוט רשימת קניות*\n\n"
-            f"אין לך רשימה פעילה כרגע.\n"
-            f"מה תרצה לעשות?"
+            f"אין לך רשימה פעילה כרגע.\n\n"
+            f"1️⃣  ✨ רשימה חדשה\n"
+            f"2️⃣  🔗 הצטרף לרשימה קיימת\n\n"
+            f"_שלח מספר לבחירה_"
         )
         buttons = [
             {"id": "new_list",  "title": "✨ רשימה חדשה"},
             {"id": "join_list", "title": "🔗 הצטרף לרשימה"},
         ]
 
-    send_buttons(to, body, buttons)
+    try:
+        send_buttons(to, body, buttons)
+    except Exception:
+        send_msg(to, body)
 
 
 def send_admin_menu(to: str, list_name: str):
@@ -623,7 +633,27 @@ def webhook():
                 send_main_menu(sender, name)
                 return str(resp)
 
-        if low in ["היי", "הי", "שלום", "start", "התחל", "menu", "תפריט", ""]:
+        # ── מפת מספרים לפי הקשר ──
+        # התפריט הראשי תמיד שולח 2 אפשרויות:
+        #   ללא רשימה פעילה: 1=רשימה חדשה, 2=הצטרף
+        #   עם רשימה פעילה:  1=הצג רשימה,  2=הוסף מוצר,  3=ניהול/שתף
+        active = get_active_list(sender)
+
+        if body in ["1", "2", "3"]:
+            num = int(body)
+            if active:
+                # יש רשימה פעילה
+                mapping = {1: "show_list", 2: "add_item", 3: "admin_menu" if is_admin_active(sender) else "share_list"}
+            else:
+                # אין רשימה פעילה
+                mapping = {1: "new_list", 2: "join_list"}
+            action = mapping.get(num)
+            if action:
+                handle_button(sender, name, action)
+            else:
+                send_main_menu(sender, name)
+
+        elif low in ["היי", "הי", "שלום", "start", "התחל", "menu", "תפריט", ""]:
             send_main_menu(sender, name)
         elif "רשימה" in low and "חדשה" in low:
             handle_button(sender, name, "new_list")
@@ -631,9 +661,12 @@ def webhook():
             handle_button(sender, name, "show_list")
         elif low in ["הצטרף", "join"]:
             handle_button(sender, name, "join_list")
+        elif low in ["הוסף", "add"]:
+            handle_button(sender, name, "add_item")
         elif low in ["עזרה", "help", "?"]:
             send_main_menu(sender, name)
         else:
+            # כל הודעה לא מוכרת → תפריט ראשי
             send_main_menu(sender, name)
 
     except Exception as e:
